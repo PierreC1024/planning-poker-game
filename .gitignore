@@ -1,0 +1,34 @@
+# Node / Vite / Vue standard ignores
+node_modules/
+dist/
+
+# Local environment & config
+.env
+.env.*.local
+.DS_Store
+*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs
+*.log
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage / test output
+coverage/
+
+# Vite cache
+.vite/
+
+# MacOS
+.Spotlight-V100
+.Trashes
+
