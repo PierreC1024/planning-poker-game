@@ -83,11 +83,11 @@ gcloud run deploy poker-planning-game \
   --region europe-west9 \
   --allow-unauthenticated \
   --max-instances=1 \
-  --concurrency=1
+  --concurrency=100
 ```
 
-- **`--max-instances=1`** keeps the service on a single Cloud Run instance.
-- **`--concurrency=1`** ensures only one HTTP request at a time per instance (optional, but keeps behavior closer to “one node” and simplifies reasoning about socket affinity).
+- **`--max-instances=1`** keeps every player on the same instance. Sessions live in memory, so a second instance would not see the same votes.
+- **`--concurrency=100`** lets one instance handle many requests at once. Socket.IO keeps a long-poll open and sends votes on a separate request; a concurrency of 1 makes Cloud Run answer those with **429** and the vote never arrives. Do not set this back to 1.
 
 After deployment, `gcloud` prints the Cloud Run URL. That URL is what you share with players to access the Planning Poker app.
 
