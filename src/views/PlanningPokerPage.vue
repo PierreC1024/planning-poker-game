@@ -15,7 +15,6 @@ const idCopyFeedback = ref(false)
 const linkCopyFeedback = ref(false)
 
 const hasSelection = computed(() => poker.currentUserCard !== null)
-const isCurrentPlayer = (id) => poker.playerId === id
 const playerHasPlayed = (id) => poker.selections[id] != null
 const otherPlayers = computed(() => poker.players.filter((p) => p.id !== poker.playerId))
 const mockPlayerWidthCh = computed(() => {
@@ -93,6 +92,8 @@ function reset() {
   poker.reset()
 }
 
+const showReconnectBanner = computed(() => !!poker.sessionId && !poker.isConnected)
+
 function exitSession() {
   poker.leaveSession()
   userStore.clearUser()
@@ -142,17 +143,11 @@ watch(
   },
   { immediate: true },
 )
-
-watch(
-  () => poker.allPlayersHaveSelected && !poker.isRevealed,
-  (shouldAutoReveal) => {
-    if (shouldAutoReveal) poker.reveal()
-  },
-)
 </script>
 
 <template>
   <div class="poker-page">
+    <p v-if="showReconnectBanner" class="reconnect-banner" role="status">Reconnecting…</p>
     <h1 class="page-title">Planning Poker Game</h1>
     <header class="poker-header">
       <div class="players-list-wrap">
@@ -191,7 +186,14 @@ watch(
           Exit
         </button>
       </div>
-      <button v-if="poker.isRevealed" class="btn btn-reset" @click="reset">New vote</button>
+      <button
+        v-if="poker.isRevealed"
+        class="btn btn-reset"
+        :disabled="!poker.isConnected"
+        @click="reset"
+      >
+        New vote
+      </button>
     </header>
 
     <div class="table">
@@ -219,7 +221,7 @@ watch(
               type="button"
               class="card-btn card-btn-hand"
               :class="{ 'card-btn-hint': tableState === 'waiting_for_players' }"
-              :disabled="poker.isRevealed"
+              :disabled="poker.isRevealed || !poker.isConnected"
               @click="selectCard(card.value)"
             >
               <span class="card-label card-label-top">
@@ -261,6 +263,7 @@ watch(
               v-if="canReveal && !poker.isRevealed"
               class="btn btn-reveal"
               :class="{ 'btn-reveal-ready': tableState === 'all_players_ready' }"
+              :disabled="!poker.isConnected"
               @click="reveal"
             >
               Reveal
@@ -285,7 +288,7 @@ watch(
               class="mock-card"
               :class="{ flipped: poker.isRevealed }"
             >
-              <span class="ready-dot" v-if="!poker.isRevealed"></span>
+              <span v-if="!poker.isRevealed" class="ready-dot"></span>
               <div class="mock-card-face mock-card-back">?</div>
               <div class="mock-card-face mock-card-front">
                 {{ getPlayerCard(p.id) === JOKER_VALUE ? '☕' : getPlayerCard(p.id) }}
@@ -336,7 +339,9 @@ watch(
               </div>
             </div>
           </div>
-          <button class="btn btn-primary" @click="reset">New vote</button>
+          <button class="btn btn-primary" :disabled="!poker.isConnected" @click="reset">
+            New vote
+          </button>
         </div>
       </div>
     </Teleport>
@@ -352,6 +357,20 @@ watch(
   padding: 1.5rem;
   color: #e5e7eb;
   position: relative;
+}
+
+.reconnect-banner {
+  position: fixed;
+  top: 0;
+  inset-inline: 0;
+  z-index: 50;
+  margin: 0;
+  padding: 0.45rem 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1a1a2e;
+  background: rgba(251, 191, 36, 0.95);
 }
 
 .page-title {
@@ -579,6 +598,11 @@ watch(
   border-radius: 8px;
   font-weight: 600;
   font-size: 0.9rem;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .btn-reset {

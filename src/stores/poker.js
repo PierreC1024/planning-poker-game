@@ -5,6 +5,20 @@ import { io } from 'socket.io-client'
 export const FIBONACCI_VALUES = [1, 2, 3, 5, 8, 13, 21, 34]
 export const JOKER_VALUE = 'joker'
 
+const PLAYER_ID_STORAGE_KEY = 'planning-poker-player-id'
+const RECONNECT_ATTEMPTS = 8
+
+function getOrCreatePlayerId() {
+  if (typeof sessionStorage === 'undefined') {
+    return crypto.randomUUID()
+  }
+  const existing = sessionStorage.getItem(PLAYER_ID_STORAGE_KEY)
+  if (existing) return existing
+  const id = crypto.randomUUID()
+  sessionStorage.setItem(PLAYER_ID_STORAGE_KEY, id)
+  return id
+}
+
 export const usePokerStore = defineStore('poker', () => {
   const isRevealed = ref(false)
   const sessionId = ref(null)
@@ -77,16 +91,27 @@ export const usePokerStore = defineStore('poker', () => {
   }
 
   function connect({ name, mode, initialSessionId }) {
-    if (socket.value && isConnected.value) return
+    if (socket.value) return
     sessionId.value = null
-    playerId.value = null
     players.value = []
     selections.value = {}
+    isRevealed.value = false
 
     if (typeof window === 'undefined') return
 
+    const stablePlayerId = getOrCreatePlayerId()
+    playerId.value = stablePlayerId
+
+    let helloMode = mode
+    let helloSessionId = initialSessionId || null
+
     const s = io({
       path: '/socket.io-poker',
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: RECONNECT_ATTEMPTS,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     })
     socket.value = s
 
@@ -94,24 +119,42 @@ export const usePokerStore = defineStore('poker', () => {
       isConnected.value = true
       s.emit('hello', {
         name,
-        mode,
-        sessionId: initialSessionId || null,
+        playerId: stablePlayerId,
+        mode: helloSessionId ? 'join' : helloMode,
+        sessionId: helloSessionId,
       })
     })
 
     s.on('welcome', (payload) => {
       const { you, ...state } = payload
-      playerId.value = you.id
+      if (you?.id) {
+        playerId.value = you.id
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem(PLAYER_ID_STORAGE_KEY, you.id)
+        }
+      }
       applyState(state)
+      if (state.sessionId) {
+        helloSessionId = state.sessionId
+        helloMode = 'join'
+      }
     })
 
     s.on('state', (payload) => {
       applyState(payload)
+      if (payload.sessionId) {
+        helloSessionId = payload.sessionId
+        helloMode = 'join'
+      }
     })
 
     s.on('disconnect', () => {
       isConnected.value = false
-      socket.value = null
+    })
+
+    s.io.on('reconnect_failed', () => {
+      if (socket.value !== s || typeof window === 'undefined') return
+      window.location.reload()
     })
   }
 
@@ -131,9 +174,11 @@ export const usePokerStore = defineStore('poker', () => {
   }
 
   function leaveSession() {
-    if (socket.value) {
-      socket.value.disconnect()
-      socket.value = null
+    const s = socket.value
+    socket.value = null
+    if (s) {
+      s.emit('leave')
+      s.disconnect()
     }
     isConnected.value = false
     sessionId.value = null

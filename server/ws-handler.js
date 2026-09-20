@@ -2,15 +2,24 @@ import { Server as SocketIOServer } from 'socket.io'
 import { v4 as uuidv4 } from 'uuid'
 
 const IO_PATH = '/socket.io-poker'
+const LEAVE_GRACE_MS = 8000
 
 /**
  * sessions: Map<sessionId, {
- *   players: Map<playerId, { id, name }>,
+ *   players: Map<playerId, { id, name, socketId }>,
  *   selections: Map<playerId, value>,
+ *   leaveTimers: Map<playerId, ReturnType<typeof setTimeout>>,
  *   isRevealed: boolean
  * }>
  */
 const sessions = new Map()
+
+function normalizePlayerId(requested) {
+  if (typeof requested !== 'string') return uuidv4()
+  const trimmed = requested.trim()
+  if (!trimmed || trimmed.length > 64) return uuidv4()
+  return trimmed
+}
 
 function getSessionState(sessionId) {
   const session = sessions.get(sessionId)
@@ -40,6 +49,42 @@ function broadcastState(io, sessionId) {
   io.to(sessionId).emit('state', state)
 }
 
+function cancelLeave(session, playerId) {
+  const timer = session.leaveTimers.get(playerId)
+  if (!timer) return
+  clearTimeout(timer)
+  session.leaveTimers.delete(playerId)
+}
+
+function removePlayer(io, sessionId, playerId, socketId) {
+  const session = sessions.get(sessionId)
+  if (!session) return
+  const player = session.players.get(playerId)
+  if (!player) return
+  if (socketId && player.socketId !== socketId) return
+
+  cancelLeave(session, playerId)
+  session.players.delete(playerId)
+  session.selections.delete(playerId)
+
+  if (session.players.size === 0) {
+    for (const timer of session.leaveTimers.values()) clearTimeout(timer)
+    sessions.delete(sessionId)
+    return
+  }
+
+  broadcastState(io, sessionId)
+}
+
+function createSession() {
+  return {
+    players: new Map(),
+    selections: new Map(),
+    leaveTimers: new Map(),
+    isRevealed: false,
+  }
+}
+
 /**
  * Attach the Planning Poker Socket.IO server to an existing HTTP server.
  * Clients connect on the same origin using Socket.IO with path IO_PATH.
@@ -55,7 +100,9 @@ export function attachPokerWs(httpServer) {
     let currentSessionId = null
     let currentPlayerId = null
 
-    socket.on('hello', ({ name, mode, sessionId: requestedId }) => {
+    socket.on('hello', (payload) => {
+      if (!payload || typeof payload !== 'object') return
+      const { name, mode, sessionId: requestedId, playerId: requestedPlayerId } = payload
       if (!name) return
 
       let sessionId = requestedId
@@ -65,19 +112,23 @@ export function attachPokerWs(httpServer) {
 
       let session = sessions.get(sessionId)
       if (!session) {
-        session = {
-          players: new Map(),
-          selections: new Map(),
-          isRevealed: false,
-        }
+        session = createSession()
         sessions.set(sessionId, session)
       }
 
-      const playerId = socket.id
+      const playerId = normalizePlayerId(requestedPlayerId)
+      cancelLeave(session, playerId)
+
       currentSessionId = sessionId
       currentPlayerId = playerId
 
-      session.players.set(playerId, { id: playerId, name })
+      const existing = session.players.get(playerId)
+      if (existing) {
+        existing.name = name
+        existing.socketId = socket.id
+      } else {
+        session.players.set(playerId, { id: playerId, name, socketId: socket.id })
+      }
       socket.join(sessionId)
 
       const welcomePayload = {
@@ -97,9 +148,10 @@ export function attachPokerWs(httpServer) {
     })
 
     socket.on('reveal', () => {
-      if (!currentSessionId) return
+      if (!currentSessionId || !currentPlayerId) return
       const session = sessions.get(currentSessionId)
       if (!session) return
+      if (!session.selections.has(currentPlayerId)) return
       session.isRevealed = true
       broadcastState(io, currentSessionId)
     })
@@ -113,17 +165,30 @@ export function attachPokerWs(httpServer) {
       broadcastState(io, currentSessionId)
     })
 
+    socket.on('leave', () => {
+      if (!currentSessionId || !currentPlayerId) return
+      const sessionId = currentSessionId
+      const playerId = currentPlayerId
+      currentSessionId = null
+      currentPlayerId = null
+      removePlayer(io, sessionId, playerId, socket.id)
+    })
+
     socket.on('disconnect', () => {
       if (!currentSessionId || !currentPlayerId) return
       const session = sessions.get(currentSessionId)
       if (!session) return
-      session.players.delete(currentPlayerId)
-      session.selections.delete(currentPlayerId)
-      if (session.players.size === 0) {
-        sessions.delete(currentSessionId)
-      } else {
-        broadcastState(io, currentSessionId)
-      }
+      const player = session.players.get(currentPlayerId)
+      if (!player || player.socketId !== socket.id) return
+
+      const sessionId = currentSessionId
+      const playerId = currentPlayerId
+      const socketId = socket.id
+      cancelLeave(session, playerId)
+      const timer = setTimeout(() => {
+        removePlayer(io, sessionId, playerId, socketId)
+      }, LEAVE_GRACE_MS)
+      session.leaveTimers.set(playerId, timer)
     })
   })
 

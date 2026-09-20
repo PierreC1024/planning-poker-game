@@ -6,7 +6,7 @@ const props = defineProps({
   },
   currentPlayerId: {
     type: String,
-    required: false,
+    default: '',
   },
   selections: {
     type: Object,

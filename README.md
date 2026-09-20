@@ -13,7 +13,7 @@ No separate WebSocket/Socket.IO process is required.
 
 ### Prerequisites
 
-- Node.js 18+ (recommended)
+- Node.js 22.12+ (recommended)
 - npm
 
 ### Install & run in development
@@ -126,12 +126,14 @@ The realtime server runs in-process with the web server, so you manage and scale
 All messages are plain JSON objects. The most important events are:
 
 - **Client → server**
-  - **`hello`**: `{ name, mode: 'create' | 'join', sessionId?: string }`  
-    Creates or joins a session and registers the player.
+  - **`hello`**: `{ name, playerId, mode: 'create' | 'join', sessionId?: string }`  
+    Creates or joins a session and registers the player. `playerId` is a stable client id so a reconnect reattaches the same player (and keeps their vote) instead of creating a new one. Reconnects always use `mode: 'join'` with the current `sessionId`.
   - **`select_card`**: `value`  
     Player selects a card; allowed only before reveal.
   - **`reveal`**: no payload  
-    Marks the session as revealed and sends final scores to everyone.
+    Marks the session as revealed and sends final scores to everyone. Accepted only if that player has already voted. Reveal is never automatic.
+  - **`leave`**: no payload  
+    Removes the player immediately (used on Exit). A network drop instead waits a short grace period before removal so a reconnect can reclaim the seat.
   - **`reset`**: no payload  
     Clears selections and starts a new voting round in the same session.
 

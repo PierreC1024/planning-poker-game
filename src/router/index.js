@@ -19,29 +19,24 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach((to) => {
   const userStore = useUserStore()
   const hasName = !!userStore.userName
 
   if (to.meta.requiresAuth && !hasName) {
     // Coming from a shared session link: remember the target sessionId in the query
     if (to.name === 'session' && to.params.sessionId) {
-      next({
+      return {
         name: 'registration',
         query: { sessionId: String(to.params.sessionId) },
-      })
-      return
+      }
     }
-    next({ name: 'registration' })
-    return
+    return { name: 'registration' }
   }
 
   if (to.meta.requiresGuest && hasName && to.name === 'registration') {
-    next({ name: 'session', params: { sessionId: 'new' } })
-    return
+    return { name: 'session', params: { sessionId: 'new' } }
   }
-
-  next()
 })
 
 export default router

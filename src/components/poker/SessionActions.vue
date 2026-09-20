@@ -1,5 +1,5 @@
 <script setup>
-const props = defineProps({
+defineProps({
   sessionId: {
     type: String,
     required: true,
